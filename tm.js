@@ -13,7 +13,24 @@
 
     const balanceTeamsEndpoint = "http://localhost:5000/balance-teams"; // URL of your backend endpoint
     let members = [];
-    let partyId = ''; // You'll need to set this to your actual party ID
+    let partyId = ''; // This will be fetched from the API
+
+    // Function to fetch the partyId
+    async function fetchPartyId() {
+        try {
+            const response = await fetch('https://www.geoguessr.com/api/v4/parties/v2');
+            const data = await response.json();
+            if (data && data.partyId) {
+                partyId = data.partyId;
+                console.log('Party ID retrieved:', partyId);
+                connectWebSocket(); // Connect to WebSocket after fetching partyId
+            } else {
+                throw new Error('Party ID not found');
+            }
+        } catch (error) {
+            console.error('Failed to fetch Party ID:', error);
+        }
+    }
 
     // Function to connect to the WebSocket
     function connectWebSocket() {
@@ -106,6 +123,6 @@
 
     observer.observe(document.body, { childList: true, subtree: true });
 
-    // Connect to the WebSocket
-    connectWebSocket();
+    // Fetch the partyId and connect to the WebSocket after
+    fetchPartyId();
 })();

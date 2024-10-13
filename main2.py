@@ -104,11 +104,16 @@ def balance_teams(user_ids):
     team_a, team_b = [], []
     for i, player in enumerate(players_data):
         if i % 2 == 0:
-            team_a.append({"username": player['username']})  # Append only username
+            team_a.append(player['username'])  # Append only username
         else:
-            team_b.append({"username": player['username']})  # Append only username
+            team_b.append(player['username'])  # Append only username
 
-    return {"team_a": team_a, "team_b": team_b}
+    # Convert team lists to comma-separated strings
+    team_a_str = ", ".join(team_a)
+    team_b_str = ", ".join(team_b)
+
+    return {"team_a": team_a_str, "team_b": team_b_str}
+
 
 @app.route('/balance-teams', methods=['POST'])
 def balance_endpoint():
