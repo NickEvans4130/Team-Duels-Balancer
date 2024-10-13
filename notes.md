@@ -1,0 +1,1 @@
+I don't think the new system has an API for that, so yeah use websockets. Basically, you open a connection to `wss://api.geoguessr.com/ws`, send this websocket message: `{"code":"Subscribe","topic":"partyv2:' + partyId + '"}`, and listen for incoming messages: the ones with code "PartyMemberListUpdated" will have the list of members in their payload
