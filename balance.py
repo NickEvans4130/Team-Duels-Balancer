@@ -1,32 +1,46 @@
 import requests
 from flask import Flask, request, jsonify
-import math
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
 def get_player_data(user_id):
-    """Fetch player data from the GeoGuessr API."""
+    """
+    Fetch relevant player data from the GeoGuessr API.
+
+    Parameters
+    ----------
+    user_id : str
+        The user ID to fetch data for.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the player's Elo, last Elo change, level, number of games played, and average score.
+        If there is an error fetching the data, returns None.
+    """
     try:
         user_info_url = f"https://www.geoguessr.com/api/v3/users/{user_id}"
         stats_url = f"https://www.geoguessr.com/api/v3/users/{user_id}/stats"
 
-        # Retrieve user info and stats
+        # Retrieve user info
         user_info = requests.get(user_info_url).json()
         stats_info = requests.get(stats_url).json()
 
         # Extract relevant data
-        elo = user_info.get('competitive', {}).get('elo', 0)
-        last_elo_change = user_info.get('competitive', {}).get('lastRatingChange', 0)
-        level = user_info.get('progress', {}).get('level', 0)
+        elo = user_info.get('rating', 0)
+        last_elo_change = user_info.get('lastEloChange', 0)
+        level = user_info.get('level', 0)
         games_played = stats_info.get('gamesPlayed', 0)
-        average_score = stats_info.get('averageGameScore', {}).get('amount', 0)
+        average_score = stats_info.get('averageScore', 0)
 
         return {
             "elo": elo,
             "last_elo_change": last_elo_change,
             "level": level,
             "games_played": games_played,
-            "average_score": float(average_score) if isinstance(average_score, str) else average_score
+            "average_score": average_score
         }
     except Exception as e:
         print(f"Error fetching data for user {user_id}: {e}")
@@ -38,41 +52,53 @@ def normalize_value(value, min_value, max_value):
         return 0
     return (value - min_value) / (max_value - min_value)
 
-def log_normalize(value, max_value):
-    """Log-normalize a value to account for diminishing returns."""
-    return math.log(value + 1) / math.log(max_value + 1)
-
 def calculate_player_score(elo, last_elo_change, level, games_played, average_score):
-    """Calculate the player's score based on multiple factors."""
     # Normalize the values based on hypothetical ranges for GeoGuessr
+    """
+    Calculate a score for a player based on their GeoGuessr statistics.
+
+    The score is a weighted sum of normalized values for Elo, last Elo change, level, number of games played, and average score.
+
+    The weights are (in order): 0.4, 0.1, 0.2, 0.2, 0.1.
+
+    Returns a score between 0 and 1, where 1 is the highest possible score.
+    """
     normalized_elo = normalize_value(elo, 800, 2400)  # Example Elo range
     normalized_last_elo_change = normalize_value(last_elo_change, -100, 100)  # Hypothetical change range
     normalized_level = normalize_value(level, 1, 100)  # Level range
-    log_normalized_games = log_normalize(games_played, 10000)  # Number of games range
-    normalized_avg_score = normalize_value(average_score, 0, 25000)  # Example average score range
+    normalized_games_played = normalize_value(games_played, 10, 1000)  # Number of games range
+    normalized_avg_score = normalize_value(average_score, 0, 5000)  # Example average score range
 
-    # Weights for each factor
-    w_elo = 0.5
-    w_last_elo_change = 0.1
-    w_level = 0.2
-    w_games = 0.15
-    w_avg_score = 0.05
-
-    # Calculate weighted score
+    # Weighted sum for the overall score
     score = (
-        (w_elo * normalized_elo) +
-        (w_last_elo_change * normalized_last_elo_change) +
-        (w_level * normalized_level) +
-        (w_games * log_normalized_games) +
-        (w_avg_score * normalized_avg_score)
+        (normalized_elo * 0.4) +
+        (normalized_last_elo_change * 0.1) +
+        (normalized_level * 0.2) +
+        (normalized_games_played * 0.2) +
+        (normalized_avg_score * 0.1)
     )
     return score
 
-def balance_teams(user_ids):
-    """Fetch player data and calculate balanced teams."""
+def balance_teams(usernames):
+    """
+    Balance a list of usernames into two teams based on their GeoGuessr
+    statistics.
+
+    The algorithm works as follows:
+
+    1. For each username, fetch the relevant player data from the
+       GeoGuessr API.
+    2. Calculate a score for each player based on their Elo, level,
+       number of games played, and average score.
+    3. Sort the players by score in descending order.
+    4. Alternate assignment to two teams (Team A and Team B).
+
+    The return value is a dictionary with the keys "Team A" and "Team B"
+    containing the usernames for each team.
+    """
     players_data = []
-    for user_id in user_ids:
-        player_data = get_player_data(user_id)
+    for username in usernames:
+        player_data = get_player_data(username)
         if player_data:
             # Calculate score for the player
             player_score = calculate_player_score(
@@ -82,27 +108,35 @@ def balance_teams(user_ids):
                 player_data['games_played'],
                 player_data['average_score']
             )
-            players_data.append({"username": user_id, "score": player_score})
+            players_data.append({"username": username, "score": player_score})
 
-    # Sort players by score in descending order
-    players_data.sort(key=lambda p: p['score'], reverse=True)
+    # Sort players by score
+    players_data.sort(key=lambda x: x['score'], reverse=True)
 
-    # Zigzag assignment to balance teams
+    # Alternate assignment to two teams
     team_a, team_b = [], []
     for i, player in enumerate(players_data):
         if i % 2 == 0:
-            team_a.append(player)
+            team_a.append(player['username'])
         else:
-            team_b.append(player)
+            team_b.append(player['username'])
 
-    return {"team_a": team_a, "team_b": team_b}
+    # Output the teams
+    return {"Team A": team_a, "Team B": team_b}
 
-@app.route('/balance', methods=['POST'])
-def balance_endpoint():
-    """API endpoint to balance teams."""
-    user_ids = request.json.get('user_ids', [])
-    balanced_teams = balance_teams(user_ids)
-    return jsonify(balanced_teams)
+@app.route('/usernames', methods=['POST'])
+def get_usernames():
+    """
+    Handles POST requests to /usernames with a JSON body containing a single
+    key-value pair: "usernames": [username1, username2, ...]. The function
+    returns a JSON response with two keys: "Team A" and "Team B", each containing
+    a list of usernames. The algorithm for balancing the teams is described in
+    the balance_teams function.
+    """
+    data = request.json
+    usernames = data['usernames']
+    teams = balance_teams(usernames)
+    return jsonify(teams)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000)

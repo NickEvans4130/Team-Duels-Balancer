@@ -1,61 +1,111 @@
 // ==UserScript==
-// @name         GeoGuessr Team Balancer
-// @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  Extracts player usernames from the GeoGuessr lobby and sends them to a Python script for team balancing.
-// @author       Cosine
-// @match        *://www.geoguessr.com/*
-// @grant        GM_xmlhttpRequest
+// @name         Geoguessr Balance Teams
+// @description  Adds a Balance Teams button to the Geoguessr settings menu to balance teams.
+// @version      1.0.1
+// @author       Sirey
+// @license      MIT
+// @match        https://www.geoguessr.com/*
+// @grant        none
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    // Function to extract usernames from the lobby
-    function getUsernames() {
-        let usernames = [];
-        // Adjust the selector based on the actual GeoGuessr lobby HTML structure
-        document.querySelectorAll(".player-username-selector").forEach(player => {
-            usernames.push(player.innerText.trim());
-        });
-        return usernames;
-    }
+    const balanceTeamsEndpoint = "http://localhost:5000/balance-teams"; // URL of your backend endpoint
+    let members = [];
+    let partyId = ''; // You'll need to set this to your actual party ID
 
-    // Function to send usernames to the local Python server
-    function sendUsernames(usernames) {
-        GM_xmlhttpRequest({
-            method: "POST",
-            url: "http://localhost:5000/usernames",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            data: JSON.stringify({ usernames: usernames }),
-            /**
-             * Called when the response to the POST request is received.
-             * Prints the response text to the console.
-             * @param {Object} response - The response object from the POST request.
-             */
-            onload: function(response) {
-                console.log("Usernames sent:", response.responseText);
+    // Function to connect to the WebSocket
+    function connectWebSocket() {
+        const socket = new WebSocket('wss://api.geoguessr.com/ws');
+
+        socket.onopen = () => {
+            console.log('WebSocket connection opened');
+            // Subscribe to the party
+            socket.send(JSON.stringify({ code: 'Subscribe', topic: 'partyv2:' + partyId }));
+        };
+
+        socket.onmessage = ({ data }) => {
+            try {
+                const received = JSON.parse(data);
+                if (received.code === 'PartyMemberListUpdated') {
+                    const payload = JSON.parse(received.payload);
+                    members = payload.members;
+                    console.log('Members updated:', members);
+                }
+            } catch (e) {
+                console.error('Error processing WebSocket message:', e);
             }
+        };
+
+        socket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+
+        socket.onclose = () => {
+            console.log('WebSocket connection closed');
+        };
+    }
+
+    // Function to send the request to balance teams
+    function sendBalanceTeamsRequest() {
+        // Ensure members are populated
+        if (members.length === 0) {
+            alert('No members found. Please ensure you are in a lobby and try again.');
+            return;
+        }
+
+        // Extract user IDs from members
+        const userIds = members.map(member => member.userId);
+
+        fetch(balanceTeamsEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ message: 'balance_teams', user_ids: userIds })
+        })
+        .then(response => {
+            if (response.ok) {
+                return response.json();
+            } else {
+                throw new Error('Failed to balance teams');
+            }
+        })
+        .then(data => {
+            alert('Teams balanced successfully:\n' + JSON.stringify(data, null, 2));
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred. Please check the console for details.');
         });
     }
 
-    // Button to trigger the team balancing
-    let balanceTeamsButton = document.createElement("button");
-    balanceTeamsButton.innerText = "Balance Teams";
-    balanceTeamsButton.style.position = "absolute";
-    balanceTeamsButton.style.top = "10px";
-    balanceTeamsButton.style.right = "10px";
-    balanceTeamsButton.style.zIndex = 1000;
-    /**
-     * Event handler for the "Balance Teams" button. Sends a list of player
-     * usernames in the lobby to the local Python server for team balancing.
-     */
-    balanceTeamsButton.onclick = function() {
-        let usernames = getUsernames();
-        sendUsernames(usernames);
-    };
+    // HTML for the "Balance Teams" button
+    const balanceTeamsButtonHTML = `
+        <div style="margin-top: 10px">
+            <button id="balanceTeamsButton" style="background-color: #4CAF50; color: white; border: none; border-radius: 5px; padding: 10px; cursor: pointer;">
+                Balance Teams
+            </button>
+        </div>
+    `;
 
-    document.body.appendChild(balanceTeamsButton);
+    // Function to add the Balance Teams button to the settings menu
+    function addBalanceTeamsButton() {
+        const settingsSection = document.querySelector('[class*=settings-modal_section__]');
+        if (settingsSection && !document.querySelector('#balanceTeamsButton')) {
+            settingsSection.insertAdjacentHTML('beforeend', balanceTeamsButtonHTML);
+            document.querySelector('#balanceTeamsButton').addEventListener('click', sendBalanceTeamsRequest);
+        }
+    }
+
+    // Check for the settings menu and add the Balance Teams button
+    const observer = new MutationObserver(() => {
+        addBalanceTeamsButton();
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // Connect to the WebSocket
+    connectWebSocket();
 })();

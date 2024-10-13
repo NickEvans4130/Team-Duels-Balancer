@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lobby players
-// @description  Get the list of players in the lobby
-// @version      0.0.1
+// @description  Get the list of players in the lobby and send to the server
+// @version      0.0.2
 // @author       You
 // @license      MIT
 // @match        https://www.geoguessr.com/*
@@ -20,11 +20,33 @@ WebSocket.prototype.send = function(...args) {
             if (received.code == 'PartyMemberListUpdated') {
                 let payload = JSON.parse(received.payload);
                 members = payload.members;
-                console.log(members.length);
-                console.log(JSON.stringify(members))
-                // member.nick, member.userId, member.team ("red" or "blue"), member.isPresent etc
+                console.log(`Number of members: ${members.length}`);
+                console.log(JSON.stringify(members));
+                
+                // Send the member data to the Python server
+                sendMembersToServer(members);
             }
-        } catch(e) {}
+        } catch (e) {
+            console.error("Error processing WebSocket message:", e);
+        }
     };
     return originalSend.call(this, ...args);
 };
+
+// Function to send the members' data to the Python server
+function sendMembersToServer(members) {
+    fetch('http://localhost:5000/lobby', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ members })
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log("Data sent to server successfully:", data);
+    })
+    .catch(error => {
+        console.error("Error sending data to server:", error);
+    });
+}
